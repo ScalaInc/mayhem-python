@@ -51,6 +51,18 @@ try:
 except ImportError:
     NEAT_FOUND = False
 
+try:
+    import cv2
+    CV2_FOUND = True
+except ImportError:
+    CV2_FOUND = False
+
+try:
+    from matplotlib import pyplot as plt
+    MPL_FOUND = True
+except ImportError:
+    MPL_FOUND = False
+
 # -------------------------------------------------------------------------------------------------
 # General
 
@@ -309,7 +321,7 @@ class Ship():
 
         self.lives -= 1
 
-        if env.render:
+        if env.render_it:
             self.sound_thrust.stop()
             self.sound_shoot.stop()
             self.sound_shield.stop()
@@ -327,20 +339,45 @@ class Ship():
             shoot_pressed  = False
             shield_pressed = False
 
-            if action[0] < -0.33:
-                left_pressed = True
-            elif action[0] > 0.33:
-                right_pressed = True
+            # -1 for action means random
+            use_random_walk = False
+            try:
+                if action == -1:
+                    use_random_walk = True
+            except:
+                pass
 
-            if action[1] <= 0:
-                thrust_pressed = True
+            if use_random_walk:
 
-            #if action == 1:
-            #    left_pressed = True
-            #if action == 2:
-            #    right_pressed = True
-            #if action == 3:
-            #    thrust_pressed = True
+                if randint(0, 1) == 1:
+                    thrust_pressed = True
+
+                v = randint(0, 2)
+                if v == 1:
+                    right_pressed = True
+                elif v == 2:
+                    left_pressed = True
+
+            else:
+                # output = 2 nodes
+                if 0:
+                    if action[0] < -0.33:
+                        left_pressed = True
+                    elif action[0] > 0.33:
+                        right_pressed = True
+
+                    if action[1] <= 0:
+                        thrust_pressed = True
+
+                # output = 3 nodes
+                else:
+                    if action[0] > 0.8:
+                        thrust_pressed = True
+                    
+                    if action[1] > 0.8:
+                        left_pressed = True
+                    elif action[2] > 0.8:
+                        right_pressed = True
 
             # record play ?
             if env.record_play:
@@ -497,15 +534,15 @@ class Ship():
             if shield_pressed:
                 self.image = self.ship_pic_shield
                 self.shield = True
-                if env.render:
+                if env.render_it:
                     self.sound_thrust.stop()
 
-                if env.render:
+                if env.render_it:
                     if not pygame.mixer.get_busy():
                         self.sound_shield.play(-1)
             else:
                 self.shield = False
-                if env.render:
+                if env.render_it:
                     self.sound_shield.stop()
 
                 # thrust
@@ -516,7 +553,7 @@ class Ship():
                     #if self.thrust >= SHIP_THRUST_MAX:
                     self.thrust = SHIP_THRUST_MAX
 
-                    if env.render:
+                    if env.render_it:
                         if not pygame.mixer.get_busy():
                             self.sound_thrust.play(-1)
 
@@ -524,7 +561,7 @@ class Ship():
 
                 else:
                     self.thrust = 0.0
-                    if env.render:
+                    if env.render_it:
                         self.sound_thrust.stop()
 
             # shoot delay
@@ -539,14 +576,14 @@ class Ship():
 
                 if self.shoot_delay:
                     if len(self.shots) < MAX_SHOOT:
-                        if env.render:
+                        if env.render_it:
                             if not pygame.mixer.get_busy():
                                 self.sound_shoot.play()
 
                         self.add_shots()
             else:
                 self.shoot = False
-                if env.render:
+                if env.render_it:
                     self.sound_shoot.stop()
 
             #
@@ -672,7 +709,7 @@ class Ship():
                     self.bounce = False
                 else:
                     self.bounce = True
-                    if env.render:
+                    if env.render_it:
                         self.sound_bounce.play()
 
                 return True
@@ -752,7 +789,7 @@ class Ship():
                     except IndexError:
                         pass
 
-    def ray_sensor(self, env, render=True):
+    def ray_sensor(self, env, render_it=True):
         # TODO use smaller map masks
         # TODO use only 0 to 90 degres ray mask quadran: https://github.com/Rabbid76/PyGameExamplesAndAnswers/blob/master/examples/minimal_examples/pygame_minimal_mask_intersect_surface_line_2.py
 
@@ -832,7 +869,7 @@ class Ship():
                 dx_hit = hit[0] - (self.xpos+SHIP_SPRITE_SIZE/2)
                 dy_hit = hit[1] - (self.ypos+SHIP_SPRITE_SIZE/2)
 
-                if render:
+                if render_it:
                     pygame.draw.line(env.game.window, LVIOLET, ship_window_pos, (ship_window_pos[0] + dx_hit, ship_window_pos[1] + dy_hit))
                     #pygame.draw.circle(map, RED, hit, 2)
 
@@ -863,11 +900,11 @@ class Ship():
 
 class MayhemEnv():
     
-    def __init__(self, game, render, nb_player, mode="game", motion="gravity", sensor="", record_play="", play_recorded=""):
+    def __init__(self, game, render_it, nb_player, mode="game", motion="gravity", sensor="", record_play="", play_recorded=""):
 
         self.myfont = pygame.font.SysFont('Arial', 20)
 
-        self.render = render
+        self.render_it = render_it
         self.nb_player = nb_player
 
         # screen
@@ -921,6 +958,7 @@ class MayhemEnv():
 
         # -- training params
         self.done = False
+        self.frame_pic = None
 
         if self.mode == "training":
             self.ship_1 = Ship(self.mode, self.game.screen_width, self.game.screen_height, 1, 1, 430, 730, \
@@ -931,7 +969,7 @@ class MayhemEnv():
         # exit on Quit
         while True:
 
-            # real training loop is done in reset() / step() / display()
+            # real training loop is done in reset() / step() / render()
             # practice_loop is just a free flight
             if self.mode == "training":
                 self.practice_loop()
@@ -1148,8 +1186,12 @@ class MayhemEnv():
         #new_state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         new_state = [0.0, 0.0, 0.0, 0.0, 0.0]
         #new_state = [0.0]
-        wall_distances = [0, 0, 0, 0, 0, 0, 0, 0]
-        new_state.extend(wall_distances)
+
+        if self.sensor == "ray":
+            wall_distances = [0, 0, 0, 0, 0, 0, 0, 0]
+            new_state.extend(wall_distances)
+        elif self.sensor == "pic":
+            new_state.extend([0]*32*32)
 
         return np.array(new_state, dtype=np.float32)
 
@@ -1172,9 +1214,6 @@ class MayhemEnv():
             # min-max: (((x - min) / (max - min)) * (end - start)) + start (typically start=0, end=1)
 
             NORMALIZE = 1
-
-            # not normalized (8 values for angle=45 degres, 12 for 30 degres etc)
-            wall_distances = [0, 0, 0, 0, 0, 0, 0, 0]
 
             if self.sensor == "ray":
                 wall_distances = self.ship_1.ray_sensor(self)
@@ -1224,10 +1263,23 @@ class MayhemEnv():
             #new_state = [thrust_on, angle_norm, vx_norm, vy_norm, ax_norm, ay_norm]
             new_state = [angle_norm, vx_norm, vy_norm, ax_norm, ay_norm]
             #new_state = [angle_norm]
-            new_state.extend(wall_distances)
+
+            if self.sensor == "ray":
+                new_state.extend(wall_distances)
+
+            elif self.sensor == "pic":
+                if self.frame_pic is not None:
+                    if NORMALIZE:
+                        new_state.extend( ((self.frame_pic/255)*2)-1 )
+                        #new_state.extend( self.frame_pic/255 )
+                    else:
+                        new_state.extend( self.frame_pic )
+                else:
+                    new_state.extend( [0]*32*32 )
 
             #print(new_state)
 
+            # TODO revard clipping
             reward = 1
 
             # do not move ?
@@ -1239,12 +1291,15 @@ class MayhemEnv():
             else:
                 self.total_dist += d
 
-            collision = False
-            for dist in wall_distances:
-                #if dist == 0:  # if normalized in [0, 1]
-                if dist == -1: # if normalized in [-1, 1]
-                    collision = True
-                    break
+            # collision (dist from wall is sensor = ray, if sensor = pic, real collision detection)
+            collision = self.ship_1.explod
+
+            if self.sensor == "ray":
+                for dist in wall_distances:
+                    #if dist == 0:  # if normalized in [0, 1]
+                    if dist == -1: # if normalized in [-1, 1]
+                        collision = True
+                        break
 
             done = self.ship_1.explod
             done |= self.frames > max_frame
@@ -1262,12 +1317,18 @@ class MayhemEnv():
             self.frames += 1
             #print(self.total_dist)
 
-            return np.array(new_state, dtype=np.float32), reward, done, {}
+            if self.sensor == "ray":
+                return np.array(new_state, dtype=np.float32), reward, done, {}
+
+            elif self.sensor == "pic":
+                #print(new_state)
+                new_state = np.reshape(new_state, 32*32 + 5)
+                return new_state, reward, done, {}
         else:
             return None, None, None, {}
 
     # training only
-    def display(self, collision_check=True):
+    def render(self, collision_check=True):
 
         # pygame events
         for event in pygame.event.get():
@@ -1291,8 +1352,12 @@ class MayhemEnv():
 
             # collision (when false we use the sensor to detect a collision)
             if collision_check:
-                self.ship_1.collide_map(self.game.map_buffer, self.game.map_buffer_mask)
-
+                try:
+                    self.ship_1.collide_map(self.game.map_buffer, self.game.map_buffer_mask)
+                # ValueError: subsurface rectangle outside surface area
+                except ValueError:
+                    self.ship_1.explod = True
+                    
             # blit ship in the map
             self.ship_1.draw(self.game.map_buffer)
 
@@ -1316,10 +1381,14 @@ class MayhemEnv():
             self.screen_print_info()
 
             # display
-            pygame.display.flip()
+            # if debug_on_screen is ON, flip() is done after processing debug info
+            if not self.game.debug_on_screen:
+                pygame.display.flip()
 
-            if self.render:
-                self.clock.tick(MAX_FPS)
+                if self.render_it:
+                    self.clock.tick(MAX_FPS)
+
+            return self.game.map_buffer.subsurface(sub_area1)
 
 # -------------------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------------------
@@ -1327,15 +1396,20 @@ class MayhemEnv():
 
 class GameWindow():
 
-    def __init__(self, screen_width, screen_height, mode):
+    def __init__(self, screen_width, screen_height, mode, debug_on_screen=False):
 
         pygame.display.set_caption('Mayhem')
+
+        self.debug_on_screen = debug_on_screen
 
         if mode == "training":
             self.screen_width = 400
             self.screen_height = 400
 
-            self.window = pygame.display.set_mode((self.screen_width, self.screen_height))
+            if self.debug_on_screen:
+                self.window = pygame.display.set_mode((self.screen_width*2, self.screen_height))
+            else:
+                self.window = pygame.display.set_mode((self.screen_width, self.screen_height))
         else:
             self.screen_width = screen_width
             self.screen_height = screen_height
@@ -1366,43 +1440,24 @@ class GameWindow():
 # -------------------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------------------
 
-class CustomNeatReporter(neat.reporting.BaseReporter):
-
-    def __init__(self):
-        self.generation = None
-
-    def start_generation(self, generation):
-        self.generation = generation
-
-    def post_evaluate(self, config, population, species, best_genome):
-        if best_genome.fitness > 1000:
-            now = dt.datetime.now()
-            net_name = f"gen{self.generation}_{best_genome.fitness}_{now.hour}h{now.minute}m{now.second}s"
-
-            with open(net_name, 'wb') as f:
-                pickle.dump(best_genome, f)
-
-            print(f"=> Dumped genome with fitness={best_genome.fitness} : {net_name}")
-
-# -------------------------------------------------------------------------------------------------
-
 class NeatTraining():
 
-    def __init__(self, runs_per_net, max_gen, multi):
+    def __init__(self, runs_per_net, max_gen, multi, input_type="ray"):
 
         self.runs_per_net = runs_per_net
         self.max_gen = max_gen
         self.multi = multi
+        self.input_type = input_type
 
     def render_loaded_genome(self, g):
         config = neat.Config( neat.DefaultGenome, neat.DefaultReproduction,
                               neat.DefaultSpeciesSet, neat.DefaultStagnation,
                               os.path.join(os.getcwd(), 'config') )
 
-        net = neat.nn.RecurrentNetwork.create(g, config)
-        #net = neat.nn.FeedForwardNetwork.create(g, config)
+        #net = neat.nn.RecurrentNetwork.create(g, config)
+        net = neat.nn.FeedForwardNetwork.create(g, config)
 
-        neat_env = MayhemEnv(game_window, False, 1, mode="training", motion="gravity", sensor="ray", record_play="", play_recorded="")
+        neat_env = MayhemEnv(game_window, False, 1, mode="training", motion="gravity", sensor=self.input_type, record_play="", play_recorded="")
         observation = neat_env.reset()
 
         done = False
@@ -1411,7 +1466,7 @@ class NeatTraining():
             #action = np.argmax(net.activate(observation))
 
             observation, reward, done, info = neat_env.step(action, max_frame=20000)
-            neat_env.display(collision_check=False)
+            neat_env.render(collision_check=False)
 
     def load_net(self, net_name=None):
 
@@ -1449,7 +1504,7 @@ class NeatTraining():
 
         pop.add_reporter(stats)
         pop.add_reporter(neat.StdOutReporter(True))
-        pop.add_reporter(CustomNeatReporter())
+        pop.add_reporter(CustomNeatReporter(self.multi))
 
         if self.multi:
             pe = neat.ParallelEvaluator(multiprocessing.cpu_count(), self.eval_genome)
@@ -1471,27 +1526,52 @@ class NeatTraining():
         #for i, g in enumerate(genome):
         #    print(i, g)
 
-        net = neat.nn.RecurrentNetwork.create(genome, config)
-        #net = neat.nn.FeedForwardNetwork.create(genome, config)
+        #net = neat.nn.RecurrentNetwork.create(genome, config)
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
 
         fitnesses = []
 
         for runs in range(self.runs_per_net):
 
-            neat_env = MayhemEnv(game_window, False, 1, mode="training", motion="gravity", sensor="ray", record_play="", play_recorded="")
+            neat_env = MayhemEnv(game_window, 0, 1, mode="training", motion="gravity", sensor=self.input_type, record_play="", play_recorded="")
             observation = neat_env.reset()
 
             fitness = 0.0
             done = False
+
+            #cv2.namedWindow("main", cv2.WINDOW_NORMAL)
+            #cv2.moveWindow("main", 100, 100)
+
             while not done:
 
                 #action = np.argmax(net.activate(observation))
                 action = net.activate(observation) # [-1.0, -0.17934807670239852, 1.0, -0.3551236740213184]
                 #print(action)
+
+                # random move
+                #action = -1
+
                 observation, reward, done, info = neat_env.step(action, max_frame=4000)
                 
                 if not self.multi:
-                    neat_env.display(collision_check=False)
+                    if self.input_type == "ray":
+                        neat_env.render(collision_check=False)
+
+                    elif self.input_type == "pic":
+                        sr = neat_env.render(collision_check=True)
+
+                        fp = pygame.surfarray.array3d(sr)
+
+                        fp = cv2.resize(fp, (32, 32))
+
+                        fp = cv2.cvtColor(fp, cv2.COLOR_RGB2BGR)  # pygame => cv2 color format
+                        fp = cv2.cvtColor(fp, cv2.COLOR_BGR2GRAY) # grey it
+
+                        #cv2.imshow('main', cv2.transpose(fp))
+                        #cv2.waitKey(1)  
+
+                        fp = np.reshape(fp, 32*32) # flat, 1d
+                        neat_env.frame_pic = fp
 
                 #print(observation)
 
@@ -1509,17 +1589,52 @@ class NeatTraining():
                             print("Dumped ", net_name)
 
 
+            # here we are done
             fitnesses.append(fitness)
 
-
+        # done for all run per net
         mean_fit = np.mean(fitnesses)
         print(mean_fit)
-
         return mean_fit
 
     def eval_genomes(self, genomes, config):
         for genome_id, genome in genomes:
             genome.fitness = self.eval_genome(genome, config)
+
+# -------------------------------------------------------------------------------------------------
+
+class CustomNeatReporter(neat.reporting.BaseReporter):
+
+    def __init__(self, multi):
+        self.multi = multi
+
+        self.generation = None
+        self.data_to_plot1 = []
+        self.data_to_plot2 = []
+
+    def start_generation(self, generation):
+        self.generation = generation
+
+    def post_evaluate(self, config, population, species, best_genome):
+
+        if not self.multi:
+            fitnesses = [c.fitness for c in population.values()]
+            self.data_to_plot2.append(np.mean(fitnesses))
+
+            self.data_to_plot1.append(best_genome.fitness)
+
+            plt.plot(self.data_to_plot1)
+            plt.plot(self.data_to_plot2)        
+            plt.pause(0.0001)
+
+        if best_genome.fitness > 1000:
+            now = dt.datetime.now()
+            net_name = f"gen{self.generation}_{best_genome.fitness}_{now.hour}h{now.minute}m{now.second}s"
+
+            with open(net_name, 'wb') as f:
+                pickle.dump(best_genome, f)
+
+            print(f"=> Dumped genome with fitness={best_genome.fitness} : {net_name}")
 
 # -------------------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------------------
@@ -1565,7 +1680,7 @@ def run():
 
     # window
     global game_window
-    game_window = GameWindow(args["width"], args["height"], args["run_mode"])
+    game_window = GameWindow(args["width"], args["height"], args["run_mode"], debug_on_screen=0)
 
     # game mode
     if args["run_mode"] == "game":
@@ -1578,10 +1693,10 @@ def run():
         USE_AI = 1
 
         USE_NEAT = 1
-        NEAT_LOAD_WINNER  = 0   #
-        NEAT_MAX_GEN      = 100 # stop if this number is reach (if not before per other criteria)
+        NEAT_LOAD_WINNER  = 0  #
+        NEAT_MAX_GEN      = 100  # stop if this number is reach (if not before per other criteria)
         NEAT_RUNS_PER_NET = 1   # useful if init position is random
-        NEAT_MULTI        = 0   # multiprocess, if true no display
+        NEAT_MULTI        = 0  # multiprocess, if true no display
 
         if NEAT_MULTI:
             pygame.display.iconify()
@@ -1601,7 +1716,7 @@ def run():
                     print("Neat has not been found on the system")
                     sys.exit(0)
                 else:
-                    neat_training = NeatTraining(NEAT_RUNS_PER_NET, NEAT_MAX_GEN, NEAT_MULTI)
+                    neat_training = NeatTraining(NEAT_RUNS_PER_NET, NEAT_MAX_GEN, NEAT_MULTI, input_type="ray")
 
                     if NEAT_LOAD_WINNER:
                         #neat_training.load_net(net_name="gen2_1068.048876452548_22h31m52s")
@@ -1609,9 +1724,52 @@ def run():
                     else:
                         neat_training.train_it()
 
-            # MLP
+            # OpenCV
             else:
-                pass
+                if CV2_FOUND:
+                    neat_training = NeatTraining(NEAT_RUNS_PER_NET, NEAT_MAX_GEN, NEAT_MULTI, input_type="pic")
+                    neat_training.train_it()
+                else:
+                    print("OpenCV not found")
+
+                if 0:   
+                    neat_env = MayhemEnv(game_window, 0, 1, mode="training", motion="gravity", sensor="ray", record_play="", play_recorded="")
+                    observation = neat_env.reset()
+
+                    fitness = 0.0
+                    done = False
+
+                    cv2.namedWindow("main", cv2.WINDOW_NORMAL)
+                    cv2.moveWindow("main", 100, 100)
+
+                    while not done:
+                        action = -1
+                        observation, reward, done, info = neat_env.step(action, max_frame=4000)
+                        sr = neat_env.render(collision_check=False)
+                        
+                        if neat_env.game.debug_on_screen:
+
+                            # https://stackoverflow.com/questions/47614396/how-do-you-convert-3d-array-in-pygame-to-an-vaid-input-in-opencv-python
+                            f = pygame.surfarray.array3d(sr)
+
+                            f = cv2.resize(f, (128, 128))    
+
+                            f = cv2.cvtColor(f, cv2.COLOR_RGB2BGR)  # pygame => cv2 color format
+                            f = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) # grey it
+
+                            #f = np.reshape(f, (128, 128))
+                            cv2.imshow('main', cv2.transpose(f))
+                            cv2.waitKey(1)  
+
+                            f = cv2.cvtColor(f, cv2.COLOR_GRAY2RGB) # cv2 => pygame color format
+
+                            sr = pygame.surfarray.make_surface(f)
+
+                            neat_env.game.window.blit(sr, (neat_env.ship_1.view_left + neat_env.ship_1.view_width, neat_env.ship_1.view_top))
+                            pygame.display.flip()
+
+                        fitness += reward
+
             
 # -------------------------------------------------------------------------------------------------
 
